@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kgvoice"
+version = "0.1.0"
+description = "Kyrgyz speech-data toolkit: entity-aware G2P, prosody profiling, localisation evaluation, and audio QC."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+studio = ["streamlit>=1.30"]
+llm = ["anthropic>=0.40"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+
+[project.scripts]
+kgvoice = "kgvoice.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["kgvoice*"]
+
+[tool.setuptools.package-data]
+kgvoice = ["data/*.json", "data/fixtures/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

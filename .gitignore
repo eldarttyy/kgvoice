@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Corpus cache — KyrgyzNER is downloaded on demand, never vendored (CC BY-NC-SA).
+.cache/
+data/corpus/
+
+# Recorded audio. Large, and licensed separately from this code; see audio/README.md.
+audio/**/*.wav
+audio/**/*.flac
+audio/**/*.mp3
+!audio/**/*.md
+!audio/**/*.json
+!audio/**/*.csv
+
+.DS_Store
+.idea/
+.vscode/
