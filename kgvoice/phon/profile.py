@@ -27,6 +27,7 @@ Signals, in rough order of how much trouble they cause a Kyrgyz voice model:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Iterable, Sequence
 
 from kgvoice.corpus.conll import EntitySpan
@@ -115,8 +116,19 @@ class WordProfile:
         }
 
 
+@lru_cache(maxsize=65536)
 def profile_word(word: str) -> WordProfile:
-    """Build a :class:`WordProfile` for a single token."""
+    """Build a :class:`WordProfile` for a single token.
+
+    Memoised. Profiling is the hot path for anything that walks a corpus —
+    :mod:`kgvoice.bench.select` scores every sentence — and running text has far
+    fewer distinct types than tokens (21k against 140k in KyrgyzNER), so the
+    cache pays for itself immediately.
+
+    The returned object is shared between callers and must be treated as
+    read-only. Nothing in the toolkit mutates a profile; if you need to, take a
+    copy first.
+    """
     w = word.strip()
     syls = syllabify(w)
     st = stress(w)

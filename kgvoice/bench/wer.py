@@ -201,7 +201,11 @@ def score(
     entity label of reference token ``i``, or ``None`` outside entities. Build it
     with :func:`labels_from_sentence`.
     """
-    ref = tokenize(reference, keep_case=keep_case) if isinstance(reference, str) else list(reference)
+    ref = (
+        tokenize(reference, keep_case=keep_case)
+        if isinstance(reference, str)
+        else list(reference)
+    )
     hyp = (
         tokenize(hypothesis, keep_case=keep_case)
         if isinstance(hypothesis, str)
