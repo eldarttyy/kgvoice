@@ -51,6 +51,27 @@ trigger  predicted  observed         n    agree
 
 Agreement is below 100% partly because the audit uses deliberately shallow morphology — it segments any word ending in a plausible surface form of the template, so `доллар` is counted as a plural of `долл`. That noise lands in the minority column and is reported rather than filtered, which is the point: the audit surfaces its own error mode instead of hiding it.
 
+## Entity-weighted WER
+
+Plain WER treats every token alike, which hides the failure mode that matters: a transcript can score well and still be useless because what it got wrong was the name, the district, and the number. Function words are recoverable from context; named entities are not.
+
+`kgvoice.bench.wer` computes the Levenshtein alignment once and reads three figures off it — overall WER, WER restricted to reference tokens inside an entity, and a per-label breakout. Insertions are charged to the span they fall inside (or the following one at a boundary), so a system cannot hallucinate freely around a name at no cost.
+
+On a KyrgyzNER sentence with one entity token corrupted:
+
+```
+WER              8.33%   (1/12)
+  entity        12.50%   (1/8)
+  non-entity     0.00%
+  S/D/I        1/0/0
+
+label              ref    S    D    I      WER
+LOCATION             6    0    0    0    0.00%
+PERIOD               2    1    0    0   50.00%
+```
+
+The same error is 8.33% or 50% depending on which question you asked. Only one of those numbers predicts whether the transcript is usable.
+
 ## Module status
 
 | Module | State | Notes |
@@ -64,11 +85,12 @@ Agreement is below 100% partly because the audit uses deliberately shallow morph
 | `kgvoice.phon.stress` | **working** | Final default, non-stress-bearing suffixes, lexicon lookup |
 | `kgvoice.phon.g2p` | **working** | Dorsal backing, lateral velarisation, long vowels, iotation |
 | `kgvoice.phon.profile` | **working** | Per-token/entity record + recording-difficulty score |
+| `kgvoice.bench.wer` | **working** | WER, entity-weighted WER, per-label breakout |
+| `kgvoice.bench` (rest) | **skeleton** | `manifest`, `qc`, `prosody` not written |
 | `kgvoice.localize` | **skeleton** | Entity-preservation / placeholder-harmony scoring |
-| `kgvoice.bench` | **skeleton** | Recording manifests, audio QC, entity-weighted WER, prosody markup |
 | `kgvoice.studio` | **skeleton** | Streamlit annotation UI |
 
-`tests/` covers the harmony layer (20 tests). The other implemented modules are exercised through the CLI but do not yet have their own test files.
+`tests/` covers harmony (20 tests) and WER (21 tests). The other implemented modules are exercised through the CLI but do not yet have their own test files. `bench.wer` is importable as a library but is **not yet wired into the CLI** — `kgvoice bench wer` still exits 2.
 
 ## CLI
 
@@ -115,10 +137,10 @@ and a human check, from independently observable signals rather than a guess.
 
 ## Roadmap
 
-1. **`bench.manifest`** — build a recording prompt list from corpus sentences, stratified so every vowel-harmony class and entity label is represented.
+1. **`bench.manifest`** — build a recording prompt list from corpus sentences, stratified so every vowel-harmony class and entity label is represented, ordered by `phon.profile.rank_by_difficulty`.
 2. **`bench.qc`** — per-clip acceptance scoring (peak/RMS, estimated SNR, clipping, lead/tail silence, format conformance) with *separate* thresholds for TTS-grade and ASR-grade use.
 3. **`bench.prosody`** — the disfluency and prosody markup scheme, plus its validator.
-4. **`bench.wer`** — WER and an entity-weighted variant, on the argument that a transcript which gets every function word right and the one place name wrong is not 95% correct for any purpose that matters.
+4. **CLI wiring for `bench`** — `kgvoice bench wer ref.txt hyp.txt --entity-weighted`.
 5. **`localize`** — entity preservation, `{placeholder}` suffix-harmony collisions, and сен/сиз register consistency across a string catalogue.
 
 ## Data and licensing
