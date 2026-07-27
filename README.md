@@ -1,5 +1,7 @@
 # kgvoice
 
+[![test](https://github.com/eldarttyy/kgvoice/actions/workflows/test.yml/badge.svg)](https://github.com/eldarttyy/kgvoice/actions/workflows/test.yml)
+
 A Kyrgyz speech-data toolkit: phonology, grapheme-to-phoneme, prosody, and audio QC — built so that every linguistic claim it makes is re-derivable from a corpus rather than asserted.
 
 **Status:** phonology, audio-benchmark, and localisation-audit layers implemented and tested (129 tests); the annotation UI is a documented skeleton. See [Module status](#module-status).
