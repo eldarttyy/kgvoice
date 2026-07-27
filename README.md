@@ -6,6 +6,10 @@ A Kyrgyz speech-data toolkit: phonology, grapheme-to-phoneme, prosody, and audio
 
 **Status:** phonology, audio-benchmark, and localisation-audit layers implemented and tested (129 tests); the annotation UI is a documented skeleton. See [Module status](#module-status).
 
+This toolkit is general-purpose and not tied to any one employer. It also
+backs a specific portfolio application built on top of it:
+[`kyrgyz-speech-eval-suite`](https://github.com/eldarttyy/kyrgyz-speech-eval-suite).
+
 ---
 
 ## Why
