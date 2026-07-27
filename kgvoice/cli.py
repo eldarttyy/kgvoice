@@ -15,8 +15,6 @@ from typing import Sequence
 from kgvoice import __version__
 
 _NOT_IMPLEMENTED = {
-    "localize": "kgvoice.localize",
-    "bench": "kgvoice.bench",
     "studio": "kgvoice.studio",
 }
 
@@ -133,6 +131,160 @@ def cmd_phon_profile(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_corpus(split: str):
+    from kgvoice.corpus import Corpus, ensure_corpus
+
+    return Corpus.from_files(ensure_corpus(split), name=f"KyrgyzNER/{split}")
+
+
+def cmd_bench_select(args: argparse.Namespace) -> int:
+    from kgvoice.bench import manifest as manifest_mod
+    from kgvoice.bench import select as select_mod
+
+    corpus = _load_corpus(args.split)
+    chosen = select_mod.select(
+        corpus.sentences, n=args.n, diversity=args.diversity, min_score=args.min_score
+    )
+    if not chosen:
+        print("no sentences passed the filters", file=sys.stderr)
+        return 1
+
+    man = manifest_mod.build(chosen, name=args.name, prefix=args.prefix)
+    out = man.save(args.out)
+
+    universe = select_mod.rank(corpus.sentences)
+    report = select_mod.coverage_report(chosen, universe)
+    print(f"wrote {len(man)} utterances to {out}")
+    print(f"  mean score        {report['mean_score']:.3f}")
+    print(f"  tokens            {report['tokens']:,}")
+    print(
+        f"  phoneme coverage  {report['phoneme_coverage']:.1%} "
+        f"({report['phonemes_covered']}/{report['phonemes_in_corpus']})"
+    )
+    labels = report["entity_labels"]
+    print(f"  entity labels     {len(labels)} classes, {sum(labels.values())} mentions")
+    for label, n in list(labels.items())[:8]:
+        print(f"    {label:<16}{n}")
+    return 0
+
+
+def cmd_bench_prompts(args: argparse.Namespace) -> int:
+    from kgvoice.bench.manifest import Manifest, write_prompts
+
+    man = Manifest.load(args.manifest)
+    out = write_prompts(man, args.out)
+    print(f"wrote {len(man)} prompts to {out}")
+    return 0
+
+
+def cmd_bench_rejected(args: argparse.Namespace) -> int:
+    """Data-quality report: which corpus sentences cannot be read aloud, and why."""
+    from collections import Counter
+
+    from kgvoice.bench.select import rejected
+
+    corpus = _load_corpus(args.split)
+    bad = rejected(corpus.sentences)
+    total = len(corpus.sentences)
+    print(f"{len(bad)}/{total} sentences ({len(bad) / total:.1%}) are unusable as prompts\n")
+    for reason, n in Counter(r.reason for r in bad).most_common(args.top):
+        print(f"  {n:>5}  {reason}")
+    if args.examples:
+        print("\nexamples:")
+        for r in bad[: args.examples]:
+            print(f"  [{r.reason}] {r.text}")
+    return 0
+
+
+def cmd_bench_qc(args: argparse.Namespace) -> int:
+    from kgvoice.bench.audio import RecordingSpec, analyze_directory, summarize
+
+    spec = RecordingSpec.strict() if args.spec == "strict" else RecordingSpec()
+    results = analyze_directory(args.audio_dir, spec=spec)
+    if not results:
+        print(f"no .wav files found in {args.audio_dir}", file=sys.stderr)
+        return 1
+
+    for r in results:
+        print(r.format())
+    print()
+    for key, value in summarize(results).items():
+        print(f"{key:<20}{value}")
+
+    if args.manifest:
+        from kgvoice.bench.manifest import Manifest, attach_recordings
+
+        man = attach_recordings(Manifest.load(args.manifest), args.audio_dir, spec_name=args.spec)
+        man.save(args.manifest)
+        print()
+        for key, value in man.progress().items():
+            print(f"{key:<20}{value}")
+
+    return 0 if all(r.passed for r in results) else 1
+
+
+def cmd_bench_wer(args: argparse.Namespace) -> int:
+    """Score transcripts against a manifest, weighted toward named entities.
+
+    Hypotheses are JSON Lines with ``utterance_id`` and ``hypothesis`` keys —
+    the shape an ASR batch job naturally emits.
+    """
+    import json
+
+    from kgvoice.bench.manifest import Manifest
+    from kgvoice.bench.wer import WERResult, score
+
+    man = Manifest.load(args.manifest)
+    hyps: dict[str, str] = {}
+    with open(args.hyp, encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                rec = json.loads(line)
+                hyps[rec["utterance_id"]] = rec.get("hypothesis", "")
+
+    total = WERResult(0, 0, 0, 0, 0)
+    scored = missing = 0
+    for item in man.items:
+        if item.utterance_id not in hyps:
+            missing += 1
+            continue
+        if not item.ref_tokens:
+            print(
+                f"warning: {item.utterance_id} has no stored reference tokens; "
+                "rebuild the manifest with a current kgvoice",
+                file=sys.stderr,
+            )
+            continue
+        total = total + score(item.ref_tokens, hyps[item.utterance_id], item.ref_labels)
+        scored += 1
+
+    if not scored:
+        print("no utterances could be scored", file=sys.stderr)
+        return 1
+    print(f"# {scored} utterances scored, {missing} missing from hypotheses\n")
+    print(total.format())
+    return 0
+
+
+def cmd_localize_audit(args: argparse.Namespace) -> int:
+    """Audit a source/target UI-string catalogue pair.
+
+    Exits 1 when the audit finds anything (missing keys, placeholder
+    mismatches, suffix collisions, or mixed register) — a CI-friendly signal
+    that a catalogue is not ready to ship.
+    """
+    from kgvoice.localize import audit_files
+
+    report = audit_files(args.source, args.target)
+    if args.format == "json":
+        import json
+
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(report.format())
+    return 0 if report.is_clean else 1
+
+
 def cmd_stub(args: argparse.Namespace) -> int:
     module = _NOT_IMPLEMENTED[args.command]
     print(
@@ -192,6 +344,58 @@ def build_parser() -> argparse.ArgumentParser:
     prof = phon_sub.add_parser("profile", help="full pronunciation record + difficulty")
     prof.add_argument("words", nargs="+")
     prof.set_defaults(func=cmd_phon_profile)
+
+    bench = sub.add_parser("bench", help="benchmark selection, audio QC, entity-weighted WER")
+    bench_sub = bench.add_subparsers(dest="subcommand", required=True)
+
+    bsel = bench_sub.add_parser("select", help="build a recording manifest from the corpus")
+    bsel.add_argument("--split", default="train", choices=("train", "test"))
+    bsel.add_argument("--n", type=int, default=100, help="utterances to select")
+    bsel.add_argument("--out", default="manifest.json")
+    bsel.add_argument("--name", default="session")
+    bsel.add_argument("--prefix", default="kg", help="utterance id prefix")
+    bsel.add_argument(
+        "--diversity",
+        type=float,
+        default=0.5,
+        help="0 = pure score, 1 = pure phoneme coverage",
+    )
+    bsel.add_argument("--min-score", type=float, default=0.0, dest="min_score")
+    bsel.set_defaults(func=cmd_bench_select)
+
+    bpr = bench_sub.add_parser("prompts", help="write a reader-facing prompt sheet")
+    bpr.add_argument("manifest")
+    bpr.add_argument("--out", default="prompts.txt")
+    bpr.set_defaults(func=cmd_bench_prompts)
+
+    brej = bench_sub.add_parser(
+        "rejected", help="corpus sentences unusable as prompts, with reasons"
+    )
+    brej.add_argument("--split", default="train", choices=("train", "test"))
+    brej.add_argument("--top", type=int, default=12)
+    brej.add_argument("--examples", type=int, default=0)
+    brej.set_defaults(func=cmd_bench_rejected)
+
+    bqc = bench_sub.add_parser("qc", help="technical QC over a directory of WAV takes")
+    bqc.add_argument("audio_dir")
+    bqc.add_argument("--spec", default="default", choices=("default", "strict"))
+    bqc.add_argument("--manifest", help="update this manifest with QC results")
+    bqc.set_defaults(func=cmd_bench_qc)
+
+    bwer = bench_sub.add_parser("wer", help="entity-weighted WER against a manifest")
+    bwer.add_argument("--manifest", required=True)
+    bwer.add_argument("--hyp", required=True, help="JSONL of {utterance_id, hypothesis}")
+    bwer.set_defaults(func=cmd_bench_wer)
+
+    localize = sub.add_parser("localize", help="EN/KY catalogue audit")
+    localize_sub = localize.add_subparsers(dest="subcommand", required=True)
+    laudit = localize_sub.add_parser(
+        "audit", help="placeholder integrity, suffix collisions, register consistency"
+    )
+    laudit.add_argument("source", help="source-language catalogue (JSON)")
+    laudit.add_argument("target", help="target-language catalogue (JSON)")
+    laudit.add_argument("--format", default="md", choices=("md", "json"))
+    laudit.set_defaults(func=cmd_localize_audit)
 
     for name in _NOT_IMPLEMENTED:
         stub = sub.add_parser(name, help="(not implemented yet)")

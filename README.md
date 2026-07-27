@@ -2,7 +2,7 @@
 
 A Kyrgyz speech-data toolkit: phonology, grapheme-to-phoneme, prosody, and audio QC — built so that every linguistic claim it makes is re-derivable from a corpus rather than asserted.
 
-**Status:** phonology layer implemented and tested; audio and localisation layers are documented skeletons. See [Module status](#module-status).
+**Status:** phonology, audio-benchmark, and localisation-audit layers implemented and tested (129 tests); the annotation UI is a documented skeleton. See [Module status](#module-status).
 
 ---
 
@@ -72,6 +72,56 @@ PERIOD               2    1    0    0   50.00%
 
 The same error is 8.33% or 50% depending on which question you asked. Only one of those numbers predicts whether the transcript is usable.
 
+## Localisation audit
+
+A translated UI string can read as fluent Kyrgyz and still be wrong in a way a proofreader won't catch: Kyrgyz is agglutinative, so a case suffix glued directly onto a `{placeholder}` is chosen by the *runtime* value's last vowel, not by the template. `{name}ге чакыруу жөнөттүңүз` ("send an invite to {name}") is correct only when `name` ends the way `-ге` expects — wrong for `Айбек` (wants `-ке`), `Нурлан` (`-га`), `Гүл` (`-гө`).
+
+```
+$ kgvoice localize audit en.json ky.json
+## Suffix collisions (Kyrgyz-specific)
+
+- `invite` — {name}ге read as **dative**
+  - target: `{name}ге чакыруу жөнөттүңүз`
+  - wrong for: Айбек -> *Айбекге* (want **Айбекке**); Нурлан -> *Нурланге* (want **Нурланга**); ...
+  - fix: Select the suffix at runtime — kgvoice.phon.harmony.attach('GA', value) — or restructure the sentence so {name} is not suffixed.
+```
+
+The same pass also reports translation coverage, dropped/invented `{placeholder}`s, and сен/сиз register consistency across the whole catalogue. `--format json` for CI; the command exits 1 when anything is found.
+
+## The recording pipeline
+
+The four `bench` modules run in order, and each stage is a CLI command.
+
+```bash
+kgvoice bench select --n 100 --out manifest.json   # pick prompts
+kgvoice bench prompts manifest.json --out prompts.txt
+#   ... record prompts.txt to audio/<utterance_id>.wav ...
+kgvoice bench qc audio/ --manifest manifest.json --spec strict
+kgvoice bench wer --manifest manifest.json --hyp transcripts.jsonl
+```
+
+**Selection** scores every sentence on entity density, numbers and dates, acronyms, and mean phonetic difficulty from `phon.profile`, then picks greedily for *phoneme coverage* so 100 prompts are diverse rather than 100 variants of one hard sentence. Eight prompts already reach 82.6% of the corpus's phoneme inventory.
+
+Selection is gated on readability first, and that gate is not cosmetic. KyrgyzNER is scraped from a news site and retains URLs, Latin transliteration, and HTML entity residue (`laquodyiykanraquo`). Those sentences score *well* on difficulty — they are full of non-alphabetic material — so without an explicit gate they dominate the ranking and the manifest is unreadable. 3.6% of the training split is excluded, with reasons:
+
+```bash
+kgvoice bench rejected --split train
+```
+
+**Manifests** carry the prompt, the gold entity spans, pronunciation hints for the two or three words per sentence a reader would otherwise get wrong, and the normalised reference tokens — so scoring later needs only the manifest, not a re-derivation of the tokenisation that might have drifted.
+
+```
+[kg-0001]
+Кытайда 200 миң, Тажикстанда 82 миң 300, Түркияда 2 миң 500, Ооганстанда 2 миң кыргыз жашайт.
+  pronunciation:
+    Тажикстанда  ->  Та-жик-стан-да  [tɑ.ʒik.stɑn.dɑ]  (unknown stress)
+    Ооганстанда  ->  Оо-ган-стан-да  [oː.ʁɑn.stɑn.dɑ]  (unknown stress)
+```
+
+**QC** measures level, peak, clipping, estimated SNR, silence lead/tail, DC offset and format against a named spec, and reports each violation with a stable code plus a message aimed at whoever recorded it — `re-record, it clipped`, not a wall of numbers. Two specs, because TTS-grade and ASR-grade are not the same bar.
+
+**Prosody** annotation is built from categories decidable from the audio. "Sounded unnatural" is not a tag; `stress-misplaced` at word 3, syllable 1, expected 2, is. `prosody.agreement` reports exact and word-level inter-annotator agreement separately — quoting only the strict figure makes a scheme look worse than it is, and only the loose one makes it look better.
+
 ## Module status
 
 | Module | State | Notes |
@@ -86,11 +136,14 @@ The same error is 8.33% or 50% depending on which question you asked. Only one o
 | `kgvoice.phon.g2p` | **working** | Dorsal backing, lateral velarisation, long vowels, iotation |
 | `kgvoice.phon.profile` | **working** | Per-token/entity record + recording-difficulty score |
 | `kgvoice.bench.wer` | **working** | WER, entity-weighted WER, per-label breakout |
-| `kgvoice.bench` (rest) | **skeleton** | `manifest`, `qc`, `prosody` not written |
-| `kgvoice.localize` | **skeleton** | Entity-preservation / placeholder-harmony scoring |
+| `kgvoice.bench.select` | **working** | Sentence scoring, readability gate, coverage-greedy selection |
+| `kgvoice.bench.manifest` | **working** | Prompts + pronunciation hints + stored references, resumable JSON |
+| `kgvoice.bench.audio` | **working** | Level, peak, clipping, SNR, silence, format conformance |
+| `kgvoice.bench.prosody` | **working** | Tag schema, validation, inter-annotator agreement |
+| `kgvoice.localize` | **working** | Placeholder integrity, suffix/placeholder collision, сен/сиз register audit — composed in `localize.audit` |
 | `kgvoice.studio` | **skeleton** | Streamlit annotation UI |
 
-`tests/` covers harmony (20 tests) and WER (21 tests). The other implemented modules are exercised through the CLI but do not yet have their own test files. `bench.wer` is importable as a library but is **not yet wired into the CLI** — `kgvoice bench wer` still exits 2.
+`tests/` covers harmony (20 tests), WER (21 tests), and `localize.audit` (12 tests). The other implemented modules are exercised through the CLI but do not yet have their own test files. Entity preservation (does a named entity survive translation intact?) is the one localisation failure class *not* checked — it needs gold entity spans tied to the source text, which a free-form UI-string catalogue doesn't carry; see the caveat in `kgvoice/localize/audit.py`.
 
 ## CLI
 
@@ -105,6 +158,9 @@ kgvoice phon syllabify программа    # прог-рам-ма
 kgvoice phon stress барбасың        # бар-БА-сың
 kgvoice phon loanword журнал
 kgvoice phon profile президент      # full record + recording-difficulty score
+
+kgvoice localize audit en.json ky.json           # markdown report, exit 1 on issues
+kgvoice localize audit en.json ky.json --format json
 ```
 
 Worked examples:
@@ -133,15 +189,14 @@ and a human check, from independently observable signals rather than a guess.
 
 - **Loanword detection under-fires on harmony-conformant borrowings outside the lexicon.** Orthographic signals catch a borrowing when it carries a non-native letter (`компьютер`), a foreign initial cluster (`брошюра`), a borrowed suffix (`мотор`, 0.30), or a harmony violation. A word with *none* of those falls through: `радар` and `канал` both score 0.00. `журнал` is caught only because it is one of the 71 stems entered by hand in `phon/lexicon.py`. Coverage therefore ends where that list ends, and the list is deliberately small — an unverified entry produces confident nonsense, while a missing one produces `unknown` and gets reviewed. Closing this properly needs a real borrowed-stem lexicon, not more heuristics.
 - The harmony audit's shallow segmentation is described above and is a known, reported source of minority-column noise.
-- Nothing in `bench` exists yet, so there is no audio in this repository and no recorded prosody annotation. The scheme is specified in `kgvoice/bench/__init__.py`; the data is not collected.
+- `bench` produces manifests and QC reports; it does not ship any recorded audio or annotation data itself. That data is collected per recording session (see `audio/README.md`) and is gitignored, not vendored.
+- `localize` has no entity-preservation check (see [Module status](#module-status)).
 
 ## Roadmap
 
-1. **`bench.manifest`** — build a recording prompt list from corpus sentences, stratified so every vowel-harmony class and entity label is represented, ordered by `phon.profile.rank_by_difficulty`.
-2. **`bench.qc`** — per-clip acceptance scoring (peak/RMS, estimated SNR, clipping, lead/tail silence, format conformance) with *separate* thresholds for TTS-grade and ASR-grade use.
-3. **`bench.prosody`** — the disfluency and prosody markup scheme, plus its validator.
-4. **CLI wiring for `bench`** — `kgvoice bench wer ref.txt hyp.txt --entity-weighted`.
-5. **`localize`** — entity preservation, `{placeholder}` suffix-harmony collisions, and сен/сиз register consistency across a string catalogue.
+1. ~~`bench.manifest`~~, ~~`bench.qc`~~, ~~`bench.prosody`~~, ~~CLI wiring for `bench`~~, ~~`localize` audit~~ — **done.**
+2. `studio` — a Streamlit UI over `bench.manifest` and `bench.prosody` for reviewing takes and recording annotations without hand-editing JSON.
+3. Entity-preservation checking in `localize`, once there is a source of gold entity spans for arbitrary UI copy (not just corpus sentences).
 
 ## Data and licensing
 
@@ -157,8 +212,8 @@ Corpus statistics as loaded (train split): 7,033 sentences, 89,248 tokens, 10,88
 kgvoice/
   corpus/     KyrgyzNER loader + downloader
   phon/       alphabet, harmony, syllable, lexicon, loanword, stress, g2p, profile
-  localize/   skeleton
-  bench/      skeleton
+  localize/   catalog, placeholders + suffix-collision, register, audit
+  bench/      select, manifest, audio, prosody, wer
   studio/     skeleton
   cli.py
 tests/        harmony test suite
