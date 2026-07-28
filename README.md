@@ -10,6 +10,20 @@ This toolkit is general-purpose and not tied to any one employer. It also
 backs a specific portfolio application built on top of it:
 [`kyrgyz-speech-eval-suite`](https://github.com/eldarttyy/kyrgyz-speech-eval-suite).
 
+**For reviewers, short on time:** three things below are easy to miss
+mid-document but are the actual point of this repo —
+
+- [The harmony result](#the-harmony-result) — a gap in the standard description
+  of Kyrgyz rounding harmony, re-derived from 14,731 corpus word types with
+  0 mismatches against the rule, not just asserted.
+- [Entity-weighted WER](#entity-weighted-wer) — the same transcript scores
+  8.33% or 50% WER depending on whether the error landed on a name; only one
+  of those numbers predicts whether it's usable.
+- [Suffix-collision detection](#localisation-audit) — catches a class of
+  Kyrgyz localisation bug (a case suffix glued to a `{placeholder}`, chosen
+  correctly for one runtime value and silently wrong for the next) that a
+  fluent-reading proofreader won't.
+
 ---
 
 ## Why
